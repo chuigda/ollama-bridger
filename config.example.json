@@ -6,6 +6,7 @@
       "name": "deepseek",
       "baseURL": "https://api.deepseek.com/v1",
       "apiKey": "YOUR_API_KEY",
+      "defaultHeaders": {},
       "models": [
         {
           "id": "deepseek-v4",
