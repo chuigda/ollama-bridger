@@ -1,0 +1,53 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 11434
+  },
+  "logging": {
+    "level": "info",
+    "logRequests": true,
+    "logResponses": false
+  },
+  "defaults": {
+    "upstream": "openai"
+  },
+  "upstreams": {
+    "openai": {
+      "baseURL": "https://api.openai.com/v1",
+      "apiKey": "sk-REPLACE_ME",
+      "timeoutMs": 120000,
+      "defaultHeaders": {}
+    },
+    "deepseek": {
+      "baseURL": "https://api.deepseek.com/v1",
+      "apiKey": "sk-REPLACE_ME",
+      "timeoutMs": 120000
+    }
+  },
+  "models": [
+    {
+      "name": "gpt-4o",
+      "upstream": "openai",
+      "remoteModel": "gpt-4o",
+      "capabilities": ["chat", "tools", "vision"]
+    },
+    {
+      "name": "gpt-4o-mini",
+      "upstream": "openai",
+      "remoteModel": "gpt-4o-mini",
+      "capabilities": ["chat", "tools", "vision"]
+    },
+    {
+      "name": "text-embedding-3-small",
+      "upstream": "openai",
+      "remoteModel": "text-embedding-3-small",
+      "capabilities": ["embedding"]
+    },
+    {
+      "name": "deepseek-chat",
+      "upstream": "deepseek",
+      "remoteModel": "deepseek-chat",
+      "capabilities": ["chat", "tools"]
+    }
+  ]
+}
