@@ -1,86 +1,142 @@
 import { Hono } from "hono";
-import { stream } from "hono/streaming";
-import type { ResolvedConfig } from "../config/loader.js";
-import type { UpstreamPool } from "../upstream/client.js";
-import type { Logger } from "../util/logger.js";
-import type { OllamaChatRequest } from "../ollama/types.js";
+import { stream as honoStream } from "hono/streaming";
+import { resolveModel } from "../config.ts";
+import { getClient } from "../provider.ts";
 import {
-    ChatStreamTranslator,
-    buildChatParams,
-    openAIChatToOllama,
-} from "../translate/chat.js";
+  buildOpenAIRequest,
+  deltaToOllamaChunk,
+  toOllamaResponse,
+  type StreamState,
+} from "../transform.ts";
+import type { OllamaChatRequest } from "../types.ts";
 
-export const chatRoutes = (
-    cfg: ResolvedConfig,
-    pool: UpstreamPool,
-    log: Logger,
-) => {
-    const app = new Hono();
+const chat = new Hono();
 
-    app.post("/api/chat", async (c) => {
-        const body = (await c.req.json()) as OllamaChatRequest;
-        if (!body?.model || !Array.isArray(body.messages)) {
-            return c.json({ error: "invalid request" }, 400);
+// POST /v1/chat/completions — OpenAI-compatible endpoint (pass-through)
+chat.post("/v1/chat/completions", async (c) => {
+  const body = (await c.req.json()) as { model: string } & Record<
+    string,
+    unknown
+  >;
+  const resolved = resolveModel(body.model);
+
+  if (!resolved) {
+    return c.json({ error: { message: `Model not found: ${body.model}`, type: "invalid_request_error" } }, 404);
+  }
+
+  const client = getClient(resolved.provider);
+
+  // Replace model name with the actual upstream model ID
+  body.model = resolved.model.id;
+
+  const isStream = body.stream ?? false;
+
+  if (isStream) {
+    // Streaming: proxy SSE through
+    const response = await client.chat.completions.create(
+      body as Parameters<typeof client.chat.completions.create>[0],
+    );
+
+    // If streaming, response is an async iterable
+    if (Symbol.asyncIterator in (response as object)) {
+      return honoStream(c, async (stream) => {
+        c.header("Content-Type", "text/event-stream");
+        c.header("Cache-Control", "no-cache");
+        c.header("Connection", "keep-alive");
+
+        const iter = response as AsyncIterable<unknown>;
+        for await (const chunk of iter) {
+          const line = `data: ${JSON.stringify(chunk)}\n\n`;
+          await stream.write(line);
         }
-        const stream$ = body.stream !== false; // 默认 true（Ollama 行为）
-        const { upstream, upstreamName, remoteModel } = cfg.resolveModel(body.model);
-        const client = pool.get(upstreamName);
-        const params = buildChatParams(body, remoteModel);
+        await stream.write("data: [DONE]\n\n");
+      });
+    }
+  }
 
-        if (cfg.raw.logging.logRequests) {
-            log.info(
-                `POST /api/chat model=${body.model} → ${upstreamName}:${remoteModel} stream=${stream$} msgs=${body.messages.length}`,
-            );
+  // Non-streaming
+  const completion = await client.chat.completions.create(
+    body as Parameters<typeof client.chat.completions.create>[0],
+  );
+  return c.json(completion);
+});
+
+// POST /api/chat — Ollama-native chat endpoint (translated to OpenAI)
+chat.post("/api/chat", async (c) => {
+  const body = (await c.req.json()) as OllamaChatRequest;
+  const resolved = resolveModel(body.model);
+
+  if (!resolved) {
+    return c.json({ error: `Model not found: ${body.model}` }, 404);
+  }
+
+  const { provider, model: modelCfg } = resolved;
+  const client = getClient(provider);
+  const shouldStream = body.stream !== false; // default true in Ollama
+  const think = body.think ?? modelCfg.supportsReasoning;
+
+  const openaiParams = buildOpenAIRequest(body, modelCfg);
+
+  if (shouldStream) {
+    openaiParams.stream = true;
+    openaiParams.stream_options = { include_usage: true };
+
+    const streamResponse = await client.chat.completions.create(openaiParams);
+
+    return honoStream(c, async (stream) => {
+      c.header("Content-Type", "application/x-ndjson");
+      c.header("Transfer-Encoding", "chunked");
+
+      const state: StreamState = {
+        thinkingBuffer: "",
+        inThinking: false,
+      };
+
+      const iter = streamResponse as AsyncIterable<
+        import("openai").ChatCompletionChunk
+      >;
+
+      for await (const chunk of iter) {
+        // Skip chunks with no choices (e.g., final usage-only chunk that has empty choices)
+        if (!chunk.choices?.length && !chunk.usage) continue;
+
+        // Handle final usage-only chunk
+        if (!chunk.choices?.length && chunk.usage) {
+          const finalChunk = {
+            model: modelCfg.alias,
+            created_at: new Date().toISOString(),
+            message: { role: "assistant" as const, content: "" },
+            done: true,
+            done_reason: "stop",
+            prompt_eval_count: chunk.usage.prompt_tokens,
+            eval_count: chunk.usage.completion_tokens,
+            total_duration: 0,
+            load_duration: 0,
+            prompt_eval_duration: 0,
+            eval_duration: 0,
+          };
+          await stream.write(JSON.stringify(finalChunk) + "\n");
+          continue;
         }
 
-        const startMs = performance.now();
-
-        if (!stream$) {
-            try {
-                const res = await client.chat.completions.create({
-                    ...params,
-                    stream: false,
-                });
-                return c.json(openAIChatToOllama(res, body.model, startMs));
-            } catch (e) {
-                log.error("chat error:", (e as Error).message);
-                return c.json({ error: (e as Error).message }, 502);
-            }
-        }
-
-        // 流式
-        return stream(c, async (s) => {
-            s.onAbort(() => log.debug("chat stream aborted by client"));
-            c.header("Content-Type", "application/x-ndjson");
-            c.header("Cache-Control", "no-store");
-
-            const translator = new ChatStreamTranslator(body.model);
-            try {
-                const iter = await client.chat.completions.create({
-                    ...params,
-                    stream: true,
-                    stream_options: { include_usage: true },
-                });
-                for await (const chunk of iter) {
-                    const out = translator.handleChunk(chunk);
-                    if (out) await s.write(JSON.stringify(out) + "\n");
-                }
-                await s.write(JSON.stringify(translator.finalize()) + "\n");
-            } catch (e) {
-                log.error("chat stream error:", (e as Error).message);
-                await s.write(
-                    JSON.stringify({
-                        model: body.model,
-                        created_at: new Date().toISOString(),
-                        message: { role: "assistant", content: "" },
-                        done: true,
-                        done_reason: "error",
-                        error: (e as Error).message,
-                    }) + "\n",
-                );
-            }
-        });
+        const ollamaChunk = deltaToOllamaChunk(
+          chunk,
+          modelCfg.alias,
+          think,
+          state,
+        );
+        await stream.write(JSON.stringify(ollamaChunk) + "\n");
+      }
     });
+  }
 
-    return app;
-};
+  // Non-streaming
+  openaiParams.stream = false;
+  const completion = (await client.chat.completions.create(
+    openaiParams,
+  )) as import("openai").ChatCompletion;
+  const ollamaResponse = toOllamaResponse(completion, modelCfg.alias, think);
+  return c.json(ollamaResponse);
+});
+
+export { chat };
