@@ -1,6 +1,6 @@
 # ollama-bridger
 
-一个轻量的 Ollama 兼容代理服务器，将请求转发到任意 OpenAI 兼容的上游 API。
+一个轻量的 Ollama 兼容代理服务器，将请求转发到任意 OpenAI 兼容的上游 API。100% Vibe Coded!
 
 ## 为什么会有这个项目？
 
