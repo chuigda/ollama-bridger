@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getAllResolvedModels } from "../config.ts";
 import type { OllamaListResponse, OllamaModel } from "../types.ts";
+import { modelDigest, startupTimestamp } from "../utils.ts";
 
 const models = new Hono();
 
@@ -12,9 +13,9 @@ function buildModelEntry(
   return {
     name: alias,
     model: alias,
-    modified_at: new Date().toISOString(),
+    modified_at: startupTimestamp,
     size: 0,
-    digest: Buffer.from(alias).toString("hex").slice(0, 64).padEnd(64, "0"),
+    digest: modelDigest(alias),
     details: {
       parent_model: "",
       format: "gguf",
@@ -36,7 +37,6 @@ models.get("/api/tags", (c) => {
       buildModelEntry(r.model.alias, r.provider.name, r.model.contextLength),
     ),
   };
-  console.info(response)
   return c.json(response);
 });
 

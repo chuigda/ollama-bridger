@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { resolveModel } from "../config.ts";
+import { modelDigest, startupTimestamp } from "../utils.ts";
 
 const show = new Hono();
 
@@ -38,7 +39,7 @@ show.post("/api/show", async (c) => {
     name: m.alias,
     model: m.alias,
     size: 0,
-    digest: "sha256:abcd1234", // Dummy digest
+    digest: modelDigest(m.alias),
     details: {
       parent_model: m.id,
       format: "gguf",
@@ -73,9 +74,8 @@ show.post("/api/show", async (c) => {
       }),
     },
     capabilities,
-    modified_at: new Date().toISOString(),
+    modified_at: startupTimestamp,
   });
-  console.info(r)
   return c.json(r);
 });
 

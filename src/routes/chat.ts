@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { stream as honoStream } from "hono/streaming";
+import type OpenAI from "openai";
 import { resolveModel } from "../config.ts";
 import { getClient } from "../provider.ts";
 import {
@@ -32,24 +33,28 @@ chat.post("/v1/chat/completions", async (c) => {
   const isStream = body.stream ?? false;
 
   if (isStream) {
-    // Streaming: proxy SSE through
     const response = await client.chat.completions.create(
       body as Parameters<typeof client.chat.completions.create>[0],
     );
 
-    // If streaming, response is an async iterable
     if (Symbol.asyncIterator in (response as object)) {
       return honoStream(c, async (stream) => {
         c.header("Content-Type", "text/event-stream");
         c.header("Cache-Control", "no-cache");
         c.header("Connection", "keep-alive");
 
-        const iter = response as AsyncIterable<unknown>;
-        for await (const chunk of iter) {
-          const line = `data: ${JSON.stringify(chunk)}\n\n`;
-          await stream.write(line);
+        try {
+          const iter = response as AsyncIterable<unknown>;
+          for await (const chunk of iter) {
+            const line = `data: ${JSON.stringify(chunk)}\n\n`;
+            await stream.write(line);
+          }
+          await stream.write("data: [DONE]\n\n");
+        } catch (err) {
+          console.error("Stream error (v1):", err);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          await stream.write(`data: ${JSON.stringify({ error: { message: errMsg, type: "server_error" } })}\n\n`);
         }
-        await stream.write("data: [DONE]\n\n");
       });
     }
   }
@@ -90,42 +95,57 @@ chat.post("/api/chat", async (c) => {
       const state: StreamState = {
         thinkingBuffer: "",
         inThinking: false,
+        toolCallBuffers: new Map(),
       };
 
       const iter = streamResponse as AsyncIterable<
         import("openai").ChatCompletionChunk
       >;
 
-      for await (const chunk of iter) {
-        // Skip chunks with no choices (e.g., final usage-only chunk that has empty choices)
-        if (!chunk.choices?.length && !chunk.usage) continue;
+      try {
+        for await (const chunk of iter) {
+          // Skip chunks with no choices (e.g., final usage-only chunk that has empty choices)
+          if (!chunk.choices?.length && !chunk.usage) continue;
 
-        // Handle final usage-only chunk
-        if (!chunk.choices?.length && chunk.usage) {
-          const finalChunk = {
-            model: modelCfg.alias,
-            created_at: new Date().toISOString(),
-            message: { role: "assistant" as const, content: "" },
-            done: true,
-            done_reason: "stop",
-            prompt_eval_count: chunk.usage.prompt_tokens,
-            eval_count: chunk.usage.completion_tokens,
-            total_duration: 0,
-            load_duration: 0,
-            prompt_eval_duration: 0,
-            eval_duration: 0,
-          };
-          await stream.write(JSON.stringify(finalChunk) + "\n");
-          continue;
+          // Handle final usage-only chunk
+          if (!chunk.choices?.length && chunk.usage) {
+            const finalChunk = {
+              model: modelCfg.alias,
+              created_at: new Date().toISOString(),
+              message: { role: "assistant" as const, content: "" },
+              done: true,
+              done_reason: "stop",
+              prompt_eval_count: chunk.usage.prompt_tokens,
+              eval_count: chunk.usage.completion_tokens,
+              total_duration: 0,
+              load_duration: 0,
+              prompt_eval_duration: 0,
+              eval_duration: 0,
+            };
+            await stream.write(JSON.stringify(finalChunk) + "\n");
+            continue;
+          }
+
+          const ollamaChunk = deltaToOllamaChunk(
+            chunk,
+            modelCfg.alias,
+            think,
+            state,
+          );
+          await stream.write(JSON.stringify(ollamaChunk) + "\n");
         }
-
-        const ollamaChunk = deltaToOllamaChunk(
-          chunk,
-          modelCfg.alias,
-          think,
-          state,
-        );
-        await stream.write(JSON.stringify(ollamaChunk) + "\n");
+      } catch (err) {
+        console.error("Stream error (ollama):", err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const errorChunk = {
+          model: modelCfg.alias,
+          created_at: new Date().toISOString(),
+          message: { role: "assistant" as const, content: "" },
+          done: true,
+          done_reason: "error",
+          error: errMsg,
+        };
+        await stream.write(JSON.stringify(errorChunk) + "\n");
       }
     });
   }

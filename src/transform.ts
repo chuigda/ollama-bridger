@@ -69,7 +69,26 @@ export function buildOpenAIRequest(
   req: OllamaChatRequest,
   modelCfg: ModelConfig,
 ): OpenAI.ChatCompletionCreateParams {
-  const messages = req.messages.map((m) => transformMessage(m, modelCfg));
+  // First pass: collect tool_call IDs from assistant messages so we can
+  // assign them to subsequent tool-role messages (Ollama doesn't track IDs).
+  const pendingToolCallIds: string[] = [];
+  const messages = req.messages.map((m) => {
+    if (m.role === "assistant" && m.tool_calls?.length) {
+      const transformed = transformMessage(m, modelCfg);
+      const assistantMsg = transformed as OpenAI.ChatCompletionAssistantMessageParam;
+      if (assistantMsg.tool_calls) {
+        for (const tc of assistantMsg.tool_calls) {
+          pendingToolCallIds.push(tc.id);
+        }
+      }
+      return transformed;
+    }
+    if (m.role === "tool") {
+      const toolCallId = pendingToolCallIds.shift() ?? `call_${Date.now()}`;
+      return { role: "tool" as const, content: m.content, tool_call_id: toolCallId } as OpenAI.ChatCompletionToolMessageParam;
+    }
+    return transformMessage(m, modelCfg);
+  });
 
   const params: OpenAI.ChatCompletionCreateParams = {
     model: modelCfg.id,
@@ -83,7 +102,7 @@ export function buildOpenAIRequest(
       type: "function" as const,
       function: {
         name: t.function.name,
-        description: t.function.description,
+        description: t.function.description ?? "",
         parameters: t.function.parameters as
           | OpenAI.FunctionParameters
           | undefined,
@@ -98,7 +117,7 @@ export function buildOpenAIRequest(
 
     // OpenAI o-series models use `reasoning_effort`
     // We set it as an extra body param since the SDK type may not include it
-    (params as Record<string, unknown>)["reasoning_effort"] = effort;
+    (params as unknown as Record<string, unknown>)["reasoning_effort"] = effort;
   }
 
   // Temperature, top_p, etc. from Ollama `options`
@@ -126,7 +145,7 @@ export function buildOpenAIRequest(
       ? (opts["num_ctx"] as number)
       : modelCfg.contextLength;
   if (typeof numCtx === "number" && numCtx > 0) {
-    (params as Record<string, unknown>)["num_ctx"] = numCtx;
+    (params as unknown as Record<string, unknown>)["num_ctx"] = numCtx;
   }
 
   // JSON mode / structured output
@@ -199,8 +218,8 @@ export function toOllamaResponse(
     message: ollamaMsg,
     done: true,
     done_reason: choice.finish_reason === "stop" ? "stop" : (choice.finish_reason ?? "stop"),
-    prompt_eval_count: usage?.prompt_tokens,
-    eval_count: usage?.completion_tokens,
+    ...(usage?.prompt_tokens != null && { prompt_eval_count: usage.prompt_tokens }),
+    ...(usage?.completion_tokens != null && { eval_count: usage.completion_tokens }),
     total_duration: 0,
     load_duration: 0,
     prompt_eval_duration: 0,
@@ -213,6 +232,8 @@ export function toOllamaResponse(
 export interface StreamState {
   thinkingBuffer: string;
   inThinking: boolean;
+  /** Accumulates partial tool call arguments per tool call index */
+  toolCallBuffers: Map<number, { name: string; arguments: string }>;
 }
 
 export function deltaToOllamaChunk(
@@ -251,24 +272,39 @@ export function deltaToOllamaChunk(
       }
     }
 
-    // Tool calls
+    // Tool calls — accumulate fragments; only emit when done
     if (d.tool_calls?.length) {
-      ollamaMsg.tool_calls = d.tool_calls
-        .filter((tc) => tc.function?.name)
-        .map(
-          (tc): OllamaToolCall => ({
-            function: {
-              name: tc.function!.name!,
-              arguments: tc.function?.arguments
-                ? (JSON.parse(tc.function.arguments) as Record<string, unknown>)
-                : {},
-            },
-          }),
-        );
+      for (const tc of d.tool_calls) {
+        const idx = tc.index;
+        let buf = state.toolCallBuffers.get(idx);
+        if (!buf) {
+          buf = { name: "", arguments: "" };
+          state.toolCallBuffers.set(idx, buf);
+        }
+        if (tc.function?.name) buf.name += tc.function.name;
+        if (tc.function?.arguments) buf.arguments += tc.function.arguments;
+      }
     }
   }
 
   const done = finishReason != null;
+
+  // When the stream is done, flush accumulated tool calls
+  if (done && state.toolCallBuffers.size > 0) {
+    ollamaMsg.tool_calls = [...state.toolCallBuffers.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(
+        ([, buf]): OllamaToolCall => ({
+          function: {
+            name: buf.name,
+            arguments: buf.arguments
+              ? (JSON.parse(buf.arguments) as Record<string, unknown>)
+              : {},
+          },
+        }),
+      );
+    state.toolCallBuffers.clear();
+  }
   const usage = delta.usage;
 
   return {
