@@ -13,7 +13,8 @@
           "alias": "deepseek-v4:latest",
           "supportsVision": false,
           "supportsTools": true,
-          "supportsReasoning": true
+          "supportsReasoning": true,
+          "contextLength": 131072
         }
       ]
     }

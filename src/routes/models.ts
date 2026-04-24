@@ -4,7 +4,11 @@ import type { OllamaListResponse, OllamaModel } from "../types.ts";
 
 const models = new Hono();
 
-function buildModelEntry(alias: string, providerName: string): OllamaModel {
+function buildModelEntry(
+  alias: string,
+  providerName: string,
+  contextLength?: number,
+): OllamaModel {
   return {
     name: alias,
     model: alias,
@@ -18,7 +22,9 @@ function buildModelEntry(alias: string, providerName: string): OllamaModel {
       families: [providerName],
       parameter_size: "unknown",
       quantization_level: "none",
+      ...(contextLength && { context_length: contextLength }),
     },
+    ...(contextLength && { context_length: contextLength }),
   };
 }
 
@@ -27,7 +33,7 @@ models.get("/api/tags", (c) => {
   const resolved = getAllResolvedModels();
   const response: OllamaListResponse = {
     models: resolved.map((r) =>
-      buildModelEntry(r.model.alias, r.provider.name),
+      buildModelEntry(r.model.alias, r.provider.name, r.model.contextLength),
     ),
   };
   console.info(response)

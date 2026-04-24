@@ -45,7 +45,7 @@ show.post("/api/show", async (c) => {
       family: provider.name,
       families: familyList,
       parameter_size: "unknown",
-      quantization_level: "unknowns",
+      quantization_level: "unknown",
     },
     model_info: {
       "general.architecture": provider.name,
@@ -53,6 +53,10 @@ show.post("/api/show", async (c) => {
       "general.name": m.alias,
       "general.capabilities": capabilities,
       "general.context_length": m.contextLength,
+      // Ollama clients typically read `{architecture}.context_length`
+      ...(m.contextLength && {
+        [`${provider.name}.context_length`]: m.contextLength,
+      }),
       "provider.name": provider.name,
       "provider.base_url": provider.baseURL,
       "model.supports_vision": m.supportsVision,

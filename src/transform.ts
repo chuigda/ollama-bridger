@@ -102,20 +102,31 @@ export function buildOpenAIRequest(
   }
 
   // Temperature, top_p, etc. from Ollama `options`
-  if (req.options) {
-    const opts = req.options;
-    if (typeof opts["temperature"] === "number")
-      params.temperature = opts["temperature"];
-    if (typeof opts["top_p"] === "number") params.top_p = opts["top_p"];
-    if (typeof opts["num_predict"] === "number")
-      params.max_tokens = opts["num_predict"];
-    if (typeof opts["stop"] !== "undefined")
-      params.stop = opts["stop"] as string | string[];
-    if (typeof opts["seed"] === "number") params.seed = opts["seed"];
-    if (typeof opts["frequency_penalty"] === "number")
-      params.frequency_penalty = opts["frequency_penalty"];
-    if (typeof opts["presence_penalty"] === "number")
-      params.presence_penalty = opts["presence_penalty"];
+  const opts = req.options ?? {};
+  if (typeof opts["temperature"] === "number")
+    params.temperature = opts["temperature"];
+  if (typeof opts["top_p"] === "number") params.top_p = opts["top_p"];
+  if (typeof opts["num_predict"] === "number")
+    params.max_tokens = opts["num_predict"];
+  if (typeof opts["stop"] !== "undefined")
+    params.stop = opts["stop"] as string | string[];
+  if (typeof opts["seed"] === "number") params.seed = opts["seed"];
+  if (typeof opts["frequency_penalty"] === "number")
+    params.frequency_penalty = opts["frequency_penalty"];
+  if (typeof opts["presence_penalty"] === "number")
+    params.presence_penalty = opts["presence_penalty"];
+
+  // Context window size. Ollama uses `num_ctx`; prefer request override,
+  // otherwise fall back to the model's configured contextLength. OpenAI chat
+  // completions does not have a standard field for this, but many
+  // OpenAI-compatible backends (vLLM, llama.cpp server, etc.) accept it as
+  // an extra body param, so we pass it through verbatim.
+  const numCtx =
+    typeof opts["num_ctx"] === "number"
+      ? (opts["num_ctx"] as number)
+      : modelCfg.contextLength;
+  if (typeof numCtx === "number" && numCtx > 0) {
+    (params as Record<string, unknown>)["num_ctx"] = numCtx;
   }
 
   // JSON mode / structured output
@@ -187,7 +198,7 @@ export function toOllamaResponse(
     created_at: new Date().toISOString(),
     message: ollamaMsg,
     done: true,
-    done_reason: choice.finish_reason === "stop" ? "stop" : "stop",
+    done_reason: choice.finish_reason === "stop" ? "stop" : (choice.finish_reason ?? "stop"),
     prompt_eval_count: usage?.prompt_tokens,
     eval_count: usage?.completion_tokens,
     total_duration: 0,
