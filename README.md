@@ -20,9 +20,9 @@ A small Ollama-compatible proxy server that forwards chat requests to OpenAI-com
 - `GET /` — health check
 - `GET /api/version` — proxy version
 - `GET /api/tags` — Ollama model list
+- `GET /v1/models` — OpenAI-style model list
 - `POST /api/show` — model details
 - `POST /v1/chat/completions` — OpenAI-compatible chat endpoint
-- `POST /api/chat` — Ollama-style chat endpoint
 
 ## Config format
 

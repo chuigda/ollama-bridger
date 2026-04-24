@@ -52,58 +52,6 @@ export interface OllamaListResponse {
   models: OllamaModel[];
 }
 
-/** Ollama-format message content can be a string or structured parts */
-export interface OllamaMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string;
-  images?: string[];
-  tool_calls?: OllamaToolCall[];
-  thinking?: string;
-}
-
-export interface OllamaToolCall {
-  function: {
-    name: string;
-    arguments: Record<string, unknown>;
-  };
-}
-
-export interface OllamaTool {
-  type: "function";
-  function: {
-    name: string;
-    description?: string;
-    parameters?: Record<string, unknown>;
-  };
-}
-
-export interface OllamaChatRequest {
-  model: string;
-  messages: OllamaMessage[];
-  stream?: boolean;
-  format?: string | Record<string, unknown>;
-  options?: Record<string, unknown>;
-  tools?: OllamaTool[];
-  think?: boolean;
-  /** Custom extension: reasoning_effort */
-  reasoning_effort?: ReasoningEffort;
-  keep_alive?: string | number;
-}
-
-export interface OllamaChatResponse {
-  model: string;
-  created_at: string;
-  message: OllamaMessage;
-  done: boolean;
-  done_reason?: string;
-  total_duration?: number;
-  load_duration?: number;
-  prompt_eval_count?: number;
-  prompt_eval_duration?: number;
-  eval_count?: number;
-  eval_duration?: number;
-}
-
 // ─── Resolution ─────────────────────────────────────────────────────────────
 
 export interface ResolvedModel {
