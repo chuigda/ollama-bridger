@@ -48,7 +48,12 @@ chat.post("/v1/chat/completions", async (c) => {
         try {
           const iter = response as AsyncIterable<unknown>;
           for await (const chunk of iter) {
-            const line = `data: ${JSON.stringify(chunk)}\n\n`;
+            // Replace upstream model ID with the alias the client requested
+            const chunkObj = chunk as Record<string, unknown>;
+            if (chunkObj["model"]) {
+              chunkObj["model"] = modelName;
+            }
+            const line = `data: ${JSON.stringify(chunkObj)}\n\n`;
             await stream.write(line);
           }
           await stream.write("data: [DONE]\n\n");
@@ -63,7 +68,9 @@ chat.post("/v1/chat/completions", async (c) => {
 
   // Non-streaming
   const completion = await client.chat.completions.create(params);
-  return c.json(completion);
+  const result = completion as unknown as Record<string, unknown>;
+  result["model"] = modelName;
+  return c.json(result);
 });
 
 export { chat };
