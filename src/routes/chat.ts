@@ -27,6 +27,13 @@ chat.post("/v1/chat/completions", async (c) => {
 
   const isStream = body["stream"] ?? false;
 
+  if (isStream) {
+    // Ensure usage is included in streamed responses
+    const streamOpts = (body["stream_options"] ?? {}) as Record<string, unknown>;
+    streamOpts["include_usage"] = true;
+    body["stream_options"] = streamOpts;
+  }
+
   const params = body as unknown as Parameters<typeof client.chat.completions.create>[0];
 
   if (isStream) {
