@@ -4,7 +4,7 @@
 
 ## 为什么会有这个项目？
 
-GitHub Pro/Pro+ 订阅[已经成为一条臭蛆](https://github.com/orgs/community/discussions/192963/)。
+GitHub Copilot Pro/Pro+ 订阅[已经成为一条臭蛆](https://github.com/orgs/community/discussions/192963/)。
 
 与此同时，GitHub Copilot 的 BYOK（Bring Your Own Key）功能目前只支持 Ollama 作为自定义模型提供方。如果你想通过 OpenAI API 接入自己的套壳站，Copilot 不给你这个选项——你只能走 Ollama。
 
