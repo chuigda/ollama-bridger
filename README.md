@@ -45,19 +45,26 @@ GitHub Pro/Pro+ 订阅[已经成为一条臭蛆](https://github.com/orgs/communi
       "name": "vendor",
       "baseURL": "https://api.vendor.com/v1",
       "apiKey": "YOUR_API_KEY",
+      "defaultHeaders": {},
       "models": [
         {
           "id": "gemini-3.1-pro-preview",
           "alias": "gemini-3.1-pro-preview",
           "supportsVision": true,
           "supportsTools": true,
-          "supportsReasoning": true
+          "supportsReasoning": true,
+          "contextLength": 192000
         }
       ]
     }
   ]
 }
 ```
+
+## 已知问题
+
+- DeepSeek v4 思考模式在调用工具之后，会显示 400，提示需要 reasoning content。尚不了解成因，但问题可能在 Copilot 插件一侧。
+- Copilot 插件一侧无法正常显示已消耗的上下文窗口，原因目前不明。
 
 ## 许可
 

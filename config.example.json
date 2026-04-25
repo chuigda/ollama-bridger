@@ -3,18 +3,18 @@
   "port": 11434,
   "providers": [
     {
-      "name": "deepseek",
-      "baseURL": "https://api.deepseek.com/v1",
+      "name": "vendor",
+      "baseURL": "https://api.vendor.com/v1",
       "apiKey": "YOUR_API_KEY",
       "defaultHeaders": {},
       "models": [
         {
-          "id": "deepseek-v4",
-          "alias": "deepseek-v4:latest",
-          "supportsVision": false,
+          "id": "gemini-3.1-pro-preview",
+          "alias": "gemini-3.1-pro-preview",
+          "supportsVision": true,
           "supportsTools": true,
           "supportsReasoning": true,
-          "contextLength": 131072
+          "contextLength": 192000
         }
       ]
     }
