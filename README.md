@@ -2,6 +2,8 @@
 
 一个轻量的 Ollama 兼容代理服务器，将请求转发到任意 OpenAI 兼容的上游 API。100% Vibe Coded!
 
+Alternative: https://github.com/JohnnyZ93/oai-compatible-copilot
+
 ## 为什么会有这个项目？
 
 GitHub Copilot Pro/Pro+ 订阅[已经成为一条臭蛆](https://github.com/orgs/community/discussions/192963/)。
